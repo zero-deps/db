@@ -1,1 +1,5 @@
 # db
+
+- put
+- get
+- pop
