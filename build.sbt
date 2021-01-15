@@ -10,6 +10,11 @@ resolvers += Resolver.sonatypeRepo("snapshots")
 lazy val ext = project.in(file("deps/ext"))
 dependsOn(ext)
 
+lazy val proto3 = project.in(file("deps/proto/scala3macros"))
+dependsOn(proto3)
+
+scalacOptions += "-language:postfixOps"
+
 turbo := true
 useCoursier := true
 Global / onChangedBuildSource := IgnoreSourceChanges
