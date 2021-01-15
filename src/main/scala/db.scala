@@ -1,21 +1,10 @@
-package zd.db
+package db
 
-import java.io.{File, RandomAccessFile}
-import java.nio.file.{Files, Paths}
+import zio._
 
-class Db {
-  var main: RandomAccessFile = null
-  def open(): Unit = {
-    Files.createDirectories(Paths.get("dat"))
-    main = new RandomAccessFile("dat/main.db", "rw")
-  }
-  def close(): Unit = {
-    if (main != null) main.close()
-  }
-}
-
-object Main extends App {
-  val db = new Db()
-  db.open()
-  db.close()
+object DbApp extends App {
+  def run(args: List[String]): URIO[ZEnv, ExitCode] =
+    for {
+      _ <- IO.succeed(1)
+    } yield ExitCode.success
 }
