@@ -1,17 +1,16 @@
 package db
-import store._
 
 import zio._, console._
 import zd.proto._
+import zero.ext._, option._
 
 object DbApp extends App {
   def run(args: List[String]): URIO[ZEnv, ExitCode] =
-    val fd = Bytes.unsafeWrap(Array(1))
-    val id = Bytes.unsafeWrap(Array(1))
-    val data = Bytes.unsafeWrap(Array('a'))
+    val fid = Fid(Array(1))
+    val dat = Dat(Array('a'))
     (for {
-      _ <- store.put(fd, id, data)
-      x <- store.get(fd, id)
-      _ <- putStrLn(x.map(_.mkString).toString)
+      id <- add(fid, dat)
+      x  <- get(fid, id)
+      _  <- putStrLn(x.cata(_.mkString, "none"))
     } yield ()).provideCustomLayer(Store.live("data")).exitCode
 }
