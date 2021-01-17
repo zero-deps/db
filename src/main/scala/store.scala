@@ -22,14 +22,17 @@ object Store {
     ZLayer.fromAcquireRelease {
       for {
         _  <- effect(RocksDB.loadLibrary())
-        op <- effect {
-                  Options()
-                    .setCreateIfMissing(true)
-                    .setCompressionType(CompressionType.LZ4_COMPRESSION)
-                }
         wo <- effect(WriteOptions())
         ro <- effect(ReadOptions())
-        db <- effect(OptimisticTransactionDB.open(op, dir))
+        db <- for {
+                op <- effect {
+                        Options()
+                          .setCreateIfMissing(true)
+                          .setCompressionType(CompressionType.LZ4_COMPRESSION)
+                      }
+                x  <- effect(OptimisticTransactionDB.open(op, dir)).map(_.toOption)
+                y  <- ZIO.getOrFailWith(new Exception("open"))(x)
+              } yield y
       } yield new Service {
 
         def get(fid: Fid, eid: Eid): RIO[ZEnv, Option[Dat]] =
@@ -110,11 +113,11 @@ extension (x: Option[Eid])
         val len = x.length
         if x.last < Byte.MaxValue
         then
-          val x1 = Arrays.copyOf(x, len)
+          val x1 = Arrays.copyOf(x, len).nn
           x1(len-1) = (x.last + 1).toByte
           x1
         else
-          val x1 = Arrays.copyOf(x, len+1)
+          val x1 = Arrays.copyOf(x, len+1).nn
           x1(len) = Byte.MinValue
           x1
 object Eid:
@@ -134,9 +137,9 @@ extension (db: OptimisticTransactionDB)
   def eff_put(k: Bytes, v: Bytes): Task[Unit] =
     effect(db.put(k, v))
   def eff_get(k: Bytes): Task[Option[Bytes]] =
-    effect(db.get(k)).map(fromNullable(_))
+    effect(db.get(k)).map(_.toOption)
   def eff_tx(wo: WriteOptions): Task[Transaction] =
-    effect(db.beginTransaction(wo))
+    effect(db.beginTransaction(wo).nn)
   def eff_close(): UIO[Unit] =
     effectTotal(db.close())
 
@@ -144,7 +147,7 @@ extension (tx: Transaction)
   def eff_put(k: Bytes, v: Bytes): Task[Unit] =
     effect(tx.put(k, v))
   def eff_get(k: Bytes, ro: ReadOptions): Task[Option[Bytes]] =
-    effect(tx.get(ro, k)).map(fromNullable(_))
+    effect(tx.get(ro, k)).map(_.toOption)
   def eff_commit(): Task[Unit] =
     effect(tx.commit())
 
