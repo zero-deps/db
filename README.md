@@ -1,3 +1,3 @@
 # db
 
-Local embedded database with feeds support and sequential consistency.
+Local embedded database with feeds support.
