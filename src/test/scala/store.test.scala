@@ -5,7 +5,7 @@ import zio._, test._, Assertion._
 object StoreSpec extends DefaultRunnableSpec {
   def spec = suite("StoreSpec")(
     testM("basic") {
-      val fid = Fid(Array(4))
+      val fid = Fid(Array(5))
       val dat = Dat(Array('a'))
       val dat2 = Dat(Array('b'))
       for {

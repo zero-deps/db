@@ -33,24 +33,25 @@ object Store {
       } yield new Service {
 
         def add(fid: Fid, dat: Dat): UIO[Eid] =
-          for {
-            tx <- db.eff_tx(wo)
-            l  <- tx.eff_get(fid, ro).fold({
-                    case NotExists => none
-                  }, _.some)
-            l1 <- l.inc
-            _  <- tx.eff_put(fid, l1)
-            _  <- for {
-                    k <- Tuple2(fid, l1).encode
-                    v <- Tuple1(l).encode
-                    _ <- tx.eff_put(k, v)
-                  } yield unit
-            _  <- for {
-                    k <- Tuple3(fid, l1, "dat").encode
-                    _ <- tx.eff_put(k, dat)
-                  } yield unit
-            _  <- tx.eff_commit()
-          } yield l1
+          db.eff_tx(wo).use { case tx =>
+            for {
+              l  <- tx.eff_get(fid, ro).fold({
+                      case NotExists => none
+                    }, _.some)
+              l1 <- l.inc
+              _  <- tx.eff_put(fid, l1)
+              _  <- for {
+                      k <- Tuple2(fid, l1).encode
+                      v <- Tuple1(l).encode
+                      _ <- tx.eff_put(k, v)
+                    } yield unit
+              _  <- for {
+                      k <- Tuple3(fid, l1, "dat").encode
+                      _ <- tx.eff_put(k, dat)
+                    } yield unit
+              _  <- tx.eff_commit()
+            } yield l1
+          }
 
         def get(fid: Fid, eid: Eid): IO[NotExists, Dat] =
           for {
@@ -147,8 +148,8 @@ extension (db: OptimisticTransactionDB)
     effect(db.put(k, v)).orDie
   def eff_get(k: Bytes): IO[NotExists, Bytes] =
     IO.require(NotExists)(effect(db.get(k)).map(_.toOption).orDie)
-  def eff_tx(wo: WriteOptions): UIO[Transaction] =
-    effect(db.beginTransaction(wo).nn).orDie
+  def eff_tx(wo: WriteOptions): UManaged[Transaction] =
+    ZManaged.fromAutoCloseable(IO.effect(db.beginTransaction(wo).nn).orDie)
   def eff_close(): UIO[Unit] =
     effectTotal(db.close())
 
@@ -156,7 +157,7 @@ extension (tx: Transaction)
   def eff_put(k: Bytes, v: Bytes): UIO[Unit] =
     effect(tx.put(k, v)).orDie
   def eff_get(k: Bytes, ro: ReadOptions): IO[NotExists, Bytes] =
-    IO.require(NotExists)(effect(tx.get(ro, k)).map(_.toOption).orDie)
+    IO.require(NotExists)(effect(tx.getForUpdate(ro, k, true)).map(_.toOption).orDie)
   def eff_commit(): UIO[Unit] =
     effect(tx.commit()).orDie
 
