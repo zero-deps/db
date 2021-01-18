@@ -11,6 +11,6 @@ object DbApp extends App {
     (for {
       id <- add(fid, dat)
       x  <- get(fid, id)
-      _  <- putStrLn(x.cata(_.mkString, "none"))
+      _  <- putStrLn(x.mkString)
     } yield ()).provideCustomLayer(Store.live("data")).exitCode
 }
