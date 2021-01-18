@@ -15,20 +15,20 @@ object Store {
     def close(): UIO[Unit]
   }
 
-  def live(dir: String): ZLayer[Any, Throwable, Store] =
+  def live(dir: String): ULayer[Store] =
     ZLayer.fromAcquireRelease {
       for {
-        _  <- effect(RocksDB.loadLibrary())
-        wo <- effect(WriteOptions())
-        ro <- effect(ReadOptions())
+        _  <- effect(RocksDB.loadLibrary()).orDie
+        wo <- effect(WriteOptions()).orDie //?
+        ro <- effect(ReadOptions()).orDie //?
         db <- for {
                 op <- effect {
                         Options()
                           .setCreateIfMissing(true)
                           .setCompressionType(CompressionType.LZ4_COMPRESSION)
-                      }
-                x  <- effect(OptimisticTransactionDB.open(op, dir)).map(_.toOption)
-                y  <- ZIO.getOrFailWith(new Exception("open"))(x)
+                      }.orDie //?
+                x  <- effect(OptimisticTransactionDB.open(op, dir)).map(_.toOption).orDie
+                y  <- ZIO.getOrFailWith(new Exception("open"))(x).orDie
               } yield y
       } yield new Service {
 
@@ -65,14 +65,14 @@ object Store {
           Stream.fromEffect(
             db.eff_get(fid).fold({case NotExists=>none}, _.some)
           ).flatMap{
-            case None => Stream.empty
-            case Some(x) =>
-              Stream.unfoldM(x){ eid =>
-                for {
-                  k <- Tuple2(fid, eid).encode
-                  v <- db.eff_get(k).orDieWith(x => Throwable(x.toString))
-                  s <- v.decode[Tuple1[Option[Eid]]]
-                } yield s._1.map(s=>(eid,s))
+              Stream.unfoldM(_){
+                case None => IO.succeed(none)
+                case Some(eid) =>
+                  for {
+                    k <- Tuple2(fid, eid).encode
+                    v <- db.eff_get(k).orDieWith(x => Throwable(x.toString))
+                    s <- v.decode[Tuple1[Option[Eid]]]
+                  } yield (eid, s._1).some
               }
           }
 
@@ -125,7 +125,17 @@ extension (x: Option[Eid])
 
 opaque type Dat = Bytes
 extension (x: Dat)
-  def mkString: String = String(x, "utf8")
+  def hex: String =
+    val hexs = "0123456789abcdef".getBytes("ascii").nn
+    val hexChars = new Array[Byte](x.length * 2)
+    var i = 0
+    while (i < x.length) {
+      val v = x(i) & 0xff
+      hexChars(i * 2) = hexs(v >>> 4)
+      hexChars(i * 2 + 1) = hexs(v & 0x0f)
+      i = i + 1
+    }
+    String(hexChars, "utf8")
 object Dat:
   def apply(xs: Bytes): Dat = xs
 
@@ -153,17 +163,6 @@ extension (tx: Transaction)
 extension [A](xs: Array[Byte])
   def decode(using c: MessageCodec[A]): UIO[A] =
     effect(api.decode(xs)).orDie
-  def hex: String =
-    val hexs = "0123456789abcdef".getBytes("ascii").nn
-    val hexChars = new Array[Byte](xs.length * 2)
-    var i = 0
-    while (i < xs.length) {
-      val v = xs(i) & 0xff
-      hexChars(i * 2) = hexs(v >>> 4)
-      hexChars(i * 2 + 1) = hexs(v & 0x0f)
-      i = i + 1
-    }
-    String(hexChars, "utf8")
 
 extension [A](x: A)
   def encode(using c: MessageCodec[A]): UIO[Bytes] =
