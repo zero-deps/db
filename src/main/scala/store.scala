@@ -11,8 +11,7 @@ object Store {
   trait Service {
     def add(fid: Fid, dat: Dat): UIO[Eid]
     def get(fid: Fid, eid: Eid): IO[NotExists, Dat]
-    // def all(fid: Fid): ZStream[Any, Throwable, Dat] =
-    //   entries(fid).mapM(getOrFail(fid, _))
+    def all(fid: Fid): UStream[Dat]
     def close(): UIO[Unit]
   }
 
@@ -59,14 +58,12 @@ object Store {
             x  <- db.eff_get(k)
           } yield x
 
-        private def entries(fid: Fid): ZStream[Any, Throwable, Dat] =
-          ZStream.fromEffect(
-            db.eff_get(fid).fold(
-              {
-                case NotExists => none
-              }
-            , _.some
-            )
+        def all(fid: Fid): UStream[Dat] =
+          entries(fid).mapM(get(fid, _).orDieWith(x => Throwable(x.toString)))
+
+        private def entries(fid: Fid): UStream[Dat] =
+          Stream.fromEffect(
+            db.eff_get(fid).fold({case NotExists=>none}, _.some)
           ).flatMap{
             case None => Stream.empty
             case Some(x) =>
@@ -94,8 +91,8 @@ def add(fid: Fid, dat: Dat): RIO[Store, Eid] =
 def get(fid: Fid, id: Eid): ZIO[Store, NotExists, Dat] =
   ZIO.accessM(_.get.get(fid, id))
 
-// def all(fid: Fid): ZStream[Store, Throwable, Dat] =
-//   ZIO.accessM(_.get.all(fid))
+def all(fid: Fid): ZStream[Store, Nothing, Dat] =
+  ZStream.accessStream(_.get.all(fid))
 
 type Store = Has[Store.Service]
 type Bytes = Array[Byte]
@@ -156,6 +153,17 @@ extension (tx: Transaction)
 extension [A](xs: Array[Byte])
   def decode(using c: MessageCodec[A]): UIO[A] =
     effect(api.decode(xs)).orDie
+  def hex: String =
+    val hexs = "0123456789abcdef".getBytes("ascii").nn
+    val hexChars = new Array[Byte](xs.length * 2)
+    var i = 0
+    while (i < xs.length) {
+      val v = xs(i) & 0xff
+      hexChars(i * 2) = hexs(v >>> 4)
+      hexChars(i * 2 + 1) = hexs(v & 0x0f)
+      i = i + 1
+    }
+    String(hexChars, "utf8")
 
 extension [A](x: A)
   def encode(using c: MessageCodec[A]): UIO[Bytes] =
