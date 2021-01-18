@@ -160,3 +160,5 @@ extension [A](xs: Array[Byte])
 extension [A](x: A)
   def encode(using c: MessageCodec[A]): UIO[Bytes] =
     effectTotal(api.encode(x))
+
+given CanEqual[None.type, Option[?]] = CanEqual.derived

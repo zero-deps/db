@@ -16,6 +16,7 @@ dependsOn(proto3)
 scalacOptions ++= Seq(
   "-language:postfixOps"
 , "-Yexplicit-nulls"
+, "-language:strictEquality"
 )
 
 turbo := true
