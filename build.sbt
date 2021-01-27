@@ -3,10 +3,9 @@ version := zero.git.version()
 
 libraryDependencies ++= Seq(
   "org.rocksdb" % "rocksdbjni" % "6.15.2"
-, "dev.zio" %% "zio-streams"  % "1.0.3+130-a21e83b8-SNAPSHOT"
-, "dev.zio" %% "zio-test-sbt" % "1.0.3+130-a21e83b8-SNAPSHOT" % Test
+, "dev.zio" %% "zio-streams"  % "1.0.4"
+, "dev.zio" %% "zio-test-sbt" % "1.0.4" % Test
 )
-resolvers += Resolver.sonatypeRepo("snapshots")
 testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")
 
 lazy val ext = project.in(file("deps/ext"))

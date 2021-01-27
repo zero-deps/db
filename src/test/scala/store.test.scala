@@ -16,5 +16,5 @@ object StoreSpec extends DefaultRunnableSpec {
       } yield assert(x.hex)(equalTo(dat.hex)) &&
               assert(xs.map(hex))(equalTo(Chunk(dat2.hex, dat.hex)))
     }
-  ).provideLayerShared(Store.live("target/testdata"))
+  ).provideLayerShared(Store.live(s"target/${System.nanoTime}"))
 }
