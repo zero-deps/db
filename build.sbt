@@ -22,4 +22,4 @@ scalacOptions ++= Seq(
 
 turbo := true
 useCoursier := true
-Global / onChangedBuildSource := IgnoreSourceChanges
+Global / onChangedBuildSource := ReloadOnSourceChanges
