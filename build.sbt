@@ -1,10 +1,10 @@
-scalaVersion := "3.0.0-M3"
+scalaVersion := "3.0.0-RC1"
 version := zero.git.version()
 
 libraryDependencies ++= Seq(
   "org.rocksdb" % "rocksdbjni" % "6.15.2"
-, "dev.zio" %% "zio-streams"  % "1.0.4"
-, "dev.zio" %% "zio-test-sbt" % "1.0.4" % Test
+, "dev.zio" %% "zio-streams"  % "1.0.4-2"
+, "dev.zio" %% "zio-test-sbt" % "1.0.4-2" % Test
 )
 testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")
 
