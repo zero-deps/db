@@ -23,3 +23,5 @@ scalacOptions ++= Seq(
 turbo := true
 useCoursier := true
 Global / onChangedBuildSource := ReloadOnSourceChanges
+
+resolvers += Resolver.JCenterRepository
