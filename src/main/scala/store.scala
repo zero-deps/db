@@ -125,18 +125,6 @@ extension (x: Option[Eid])
         } yield xs
 
 opaque type Dat = Bytes
-extension (x: Dat)
-  def hex: String =
-    val hexs = "0123456789abcdef".getBytes("ascii").nn
-    val hexChars = new Array[Byte](x.length * 2)
-    var i = 0
-    while (i < x.length) {
-      val v = x(i) & 0xff
-      hexChars(i * 2) = hexs(v >>> 4)
-      hexChars(i * 2 + 1) = hexs(v & 0x0f)
-      i = i + 1
-    }
-    String(hexChars, "utf8")
 object Dat:
   def apply(xs: Bytes): Dat = xs
 
