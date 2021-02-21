@@ -125,6 +125,8 @@ extension (x: Option[Eid])
         } yield xs
 
 opaque type Dat = Bytes
+extension (x: Dat)
+  def show: String = x.hex.utf8
 object Dat:
   def apply(xs: Bytes): Dat = xs
 

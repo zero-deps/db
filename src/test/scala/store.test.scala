@@ -13,8 +13,8 @@ object StoreSpec extends DefaultRunnableSpec {
         x  <- get(fid, id)
         _  <- add(fid, dat2)
         xs <- all(fid).runCollect
-      } yield assert(x.hex)(equalTo(dat.hex)) &&
-              assert(xs.map(hex))(equalTo(Chunk(dat2.hex, dat.hex)))
+      } yield assert(x.show)(equalTo(dat.show)) &&
+              assert(xs.map(_.show))(equalTo(Chunk(dat2.show, dat.show)))
     }
   ).provideLayerShared(Store.live(s"target/${System.nanoTime}"))
 }
