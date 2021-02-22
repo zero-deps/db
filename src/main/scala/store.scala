@@ -22,6 +22,7 @@ object Store {
   def live(dir: String): ULayer[Store] =
     ZLayer.fromAcquireRelease {
       for {
+        _  <- effectTotal(RocksDB.loadLibrary())
         wo <- effectTotal(WriteOptions())
         ro <- effectTotal(ReadOptions())
         db <- for {
