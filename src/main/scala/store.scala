@@ -3,34 +3,43 @@ package db
 import zio._, duration._, stream._
 import zio.IO.{effect, effectTotal}
 import zero.ext._, option._
-import zd.proto.{Bytes=>_,_}, api.MessageCodec, macrosapi._
+import zd.proto._, api.MessageCodec, macrosapi._
 import org.rocksdb.{util=>_,_}
 import java.util.Arrays
 
 object Store {
   trait Service {
+    def put(key: Key, v: Dat): UIO[Unit]
+    def get(key: Key): UIO[Option[Dat]]
+
     def add(fid: Fid, dat: Dat): UIO[Eid]
     def get(fid: Fid, eid: Eid): IO[NotExists, Dat]
     def all(fid: Fid): UStream[Dat]
+
     def close(): UIO[Unit]
   }
 
   def live(dir: String): ULayer[Store] =
     ZLayer.fromAcquireRelease {
       for {
-        _  <- effect(RocksDB.loadLibrary()).orDie
-        wo <- effect(WriteOptions()).orDie //?
-        ro <- effect(ReadOptions()).orDie //?
+        wo <- effectTotal(WriteOptions())
+        ro <- effectTotal(ReadOptions())
         db <- for {
-                op <- effect {
+                op <- effectTotal {
                         Options()
                           .setCreateIfMissing(true)
                           .setCompressionType(CompressionType.LZ4_COMPRESSION)
-                      }.orDie //?
+                      }
                 x  <- effect(OptimisticTransactionDB.open(op, dir)).map(_.toOption).orDie
-                y  <- ZIO.getOrFailWith(new Exception("open"))(x).orDie
+                y  <- ZIO.getOrFailWith(Exception("open"))(x).orDie
               } yield y
       } yield new Service {
+
+        def put(key: Key, v: Dat): UIO[Unit] =
+          db.eff_put(key, v)
+
+        def get(key: Key): UIO[Option[Dat]] =
+          db.eff_getOrNone(key)
 
         def add(fid: Fid, dat: Dat): UIO[Eid] =
           db.eff_tx(wo).use { case tx =>
@@ -77,14 +86,20 @@ object Store {
               }
           }
 
-        private given MessageCodec[Tuple1[Option[Eid]]] = caseCodecIdx
-        private given MessageCodec[Tuple2[Fid,Eid]] = caseCodecIdx
-        private given MessageCodec[Tuple3[Fid,Eid,String]] = caseCodecIdx
+        given MessageCodec[Tuple1[Option[Eid]]] = caseCodecIdx
+        given MessageCodec[Tuple2[Fid,Eid]] = caseCodecIdx
+        given MessageCodec[Tuple3[Fid,Eid,String]] = caseCodecIdx
 
         def close(): UIO[Unit] = db.eff_close()
       }
     }(_.close())
 }
+
+def put(key: Dat, v: Dat): RIO[Store, Unit] =
+  ZIO.accessM(_.get.put(key, v))
+
+def get(key: Dat): RIO[Store, Option[Dat]] =
+  ZIO.accessM(_.get.get(key))
 
 def add(fid: Fid, dat: Dat): RIO[Store, Eid] =
   ZIO.accessM(_.get.add(fid, dat))
@@ -96,13 +111,14 @@ def all(fid: Fid): ZStream[Store, Nothing, Dat] =
   ZStream.accessStream(_.get.all(fid))
 
 type Store = Has[Store.Service]
-type Bytes = Array[Byte]
 
-opaque type Fid = Bytes
+opaque type Key = Array[Byte]
+
+opaque type Fid = Array[Byte]
 object Fid:
-  def apply(xs: Bytes): Fid = xs
+  def apply(xs: Array[Byte]): Fid = xs
 
-opaque type Eid = Bytes
+opaque type Eid = Array[Byte]
 extension (x: Option[Eid])
   def inc: UIO[Eid] =
     x match
@@ -124,29 +140,31 @@ extension (x: Option[Eid])
                   } yield x1
         } yield xs
 
-opaque type Dat = Bytes
+opaque type Dat = Array[Byte]
+object Dat:
+  def apply(xs: Array[Byte]): Dat = xs
 extension (x: Dat)
   def show: String = x.hex.utf8
-object Dat:
-  def apply(xs: Bytes): Dat = xs
 
 case object NotExists
 type NotExists = NotExists.type
 
 extension (db: OptimisticTransactionDB)
-  def eff_put(k: Bytes, v: Bytes): UIO[Unit] =
+  def eff_put(k: Array[Byte], v: Array[Byte]): UIO[Unit] =
     effect(db.put(k, v)).orDie
-  def eff_get(k: Bytes): IO[NotExists, Bytes] =
-    IO.require(NotExists)(effect(db.get(k)).map(_.toOption).orDie)
+  def eff_get(k: Array[Byte]): IO[NotExists, Array[Byte]] =
+    IO.require(NotExists)(eff_getOrNone(k))
+  def eff_getOrNone(k: Array[Byte]): UIO[Option[Array[Byte]]] =
+    effect(db.get(k)).map(_.toOption).orDie
   def eff_tx(wo: WriteOptions): UManaged[Transaction] =
     ZManaged.fromAutoCloseable(IO.effect(db.beginTransaction(wo).nn).orDie)
   def eff_close(): UIO[Unit] =
     effectTotal(db.close())
 
 extension (tx: Transaction)
-  def eff_put(k: Bytes, v: Bytes): UIO[Unit] =
+  def eff_put(k: Array[Byte], v: Array[Byte]): UIO[Unit] =
     effect(tx.put(k, v)).orDie
-  def eff_get(k: Bytes, ro: ReadOptions): IO[NotExists, Bytes] =
+  def eff_get(k: Array[Byte], ro: ReadOptions): IO[NotExists, Array[Byte]] =
     IO.require(NotExists)(effect(tx.getForUpdate(ro, k, true)).map(_.toOption).orDie)
   def eff_commit(): UIO[Unit] =
     effect(tx.commit()).orDie
@@ -156,7 +174,7 @@ extension [A](xs: Array[Byte])
     effect(api.decode(xs)).orDie
 
 extension [A](x: A)
-  def encode(using c: MessageCodec[A]): UIO[Bytes] =
+  def encode(using c: MessageCodec[A]): UIO[Array[Byte]] =
     effectTotal(api.encode(x))
 
 given CanEqual[None.type, Option[?]] = CanEqual.derived
