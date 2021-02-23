@@ -96,13 +96,13 @@ object Store {
     }(_.close())
 }
 
-def put(key: Dat, v: Dat): RIO[Store, Unit] =
+def put(key: Key, v: Dat): URIO[Store, Unit] =
   ZIO.accessM(_.get.put(key, v))
 
-def get(key: Dat): RIO[Store, Option[Dat]] =
+def get(key: Key): URIO[Store, Option[Dat]] =
   ZIO.accessM(_.get.get(key))
 
-def add(fid: Fid, dat: Dat): RIO[Store, Eid] =
+def add(fid: Fid, dat: Dat): URIO[Store, Eid] =
   ZIO.accessM(_.get.add(fid, dat))
 
 def get(fid: Fid, id: Eid): ZIO[Store, NotExists, Dat] =
@@ -114,6 +114,8 @@ def all(fid: Fid): ZStream[Store, Nothing, Dat] =
 type Store = Has[Store.Service]
 
 opaque type Key = Array[Byte]
+object Key:
+  def apply(xs: Array[Byte]): Key = xs
 
 opaque type Fid = Array[Byte]
 object Fid:
@@ -146,6 +148,8 @@ object Dat:
   def apply(xs: Array[Byte]): Dat = xs
 extension (x: Dat)
   def show: String = x.hex.utf8
+  def toKey: Key = x
+  def bytes: Array[Byte] = x
 
 case object NotExists
 type NotExists = NotExists.type
