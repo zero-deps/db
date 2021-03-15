@@ -4,4 +4,3 @@
 [submodule "proto"]
 	path = deps/proto
 	url = https://github.com/zero-deps/proto.git
-	branch = m3

@@ -3,7 +3,7 @@ package db
 import zio._, duration._, stream._
 import zio.IO.{effect, effectTotal}
 import zero.ext._, option._
-import zd.proto._, api.MessageCodec, macrosapi._
+import proto._, api.MessageCodec, macros._
 import org.rocksdb.{util=>_,_}
 import java.util.Arrays
 
@@ -37,36 +37,36 @@ object Store {
       } yield new Service {
 
         def put(key: Key, v: Dat): UIO[Unit] =
-          db.eff_put(key, v)
+          db.pute(key, v)
 
         def get(key: Key): UIO[Option[Dat]] =
-          db.eff_getOrNone(key)
+          db.getOrNone(key)
 
         def add(fid: Fid, dat: Dat): UIO[Eid] =
-          db.eff_tx(wo).use { case tx =>
+          db.txe(wo).use { case tx =>
             for {
-              l  <- tx.eff_get(fid, ro).fold({
+              l  <- tx.gete(fid, ro).fold({
                       case NotExists => none
                     }, _.some)
               l1 <- l.inc
-              _  <- tx.eff_put(fid, l1)
+              _  <- tx.pute(fid, l1)
               _  <- for {
-                      k <- Tuple2(fid, l1).encode
-                      v <- Tuple1(l).encode
-                      _ <- tx.eff_put(k, v)
+                      k <- encode(Tuple2(fid, l1))
+                      v <- encode(Tuple1(l))
+                      _ <- tx.pute(k, v)
                     } yield unit
               _  <- for {
-                      k <- Tuple3(fid, l1, "dat").encode
-                      _ <- tx.eff_put(k, dat)
+                      k <- encode(Tuple3(fid, l1, "dat"))
+                      _ <- tx.pute(k, dat)
                     } yield unit
-              _  <- tx.eff_commit()
+              _  <- tx.commite()
             } yield l1
           }
 
         def get(fid: Fid, eid: Eid): IO[NotExists, Dat] =
           for {
-            k  <- Tuple3(fid, eid, "dat").encode
-            x  <- db.eff_get(k)
+            k  <- encode(Tuple3(fid, eid, "dat"))
+            x  <- db.gete(k)
           } yield x
 
         def all(fid: Fid): UStream[Dat] =
@@ -74,15 +74,15 @@ object Store {
 
         private def entries(fid: Fid): UStream[Dat] =
           Stream.fromEffect(
-            db.eff_get(fid).fold({case NotExists=>none}, _.some)
+            db.gete(fid).fold({case NotExists=>none}, _.some)
           ).flatMap{
               Stream.unfoldM(_){
                 case None => IO.succeed(none)
                 case Some(eid) =>
                   for {
-                    k <- Tuple2(fid, eid).encode
-                    v <- db.eff_get(k).orDieWith(x => Throwable(x.toString))
-                    s <- v.decode[Tuple1[Option[Eid]]]
+                    k <- encode(Tuple2(fid, eid))
+                    v <- db.gete(k).orDieWith(x => Throwable(x.toString))
+                    s <- decode[Tuple1[Option[Eid]]](v)
                   } yield (eid, s._1).some
               }
           }
@@ -155,31 +155,29 @@ case object NotExists
 type NotExists = NotExists.type
 
 extension (db: OptimisticTransactionDB)
-  def eff_put(k: Array[Byte], v: Array[Byte]): UIO[Unit] =
+  def pute(k: Array[Byte], v: Array[Byte]): UIO[Unit] =
     effect(db.put(k, v)).orDie
-  def eff_get(k: Array[Byte]): IO[NotExists, Array[Byte]] =
-    IO.require(NotExists)(eff_getOrNone(k))
-  def eff_getOrNone(k: Array[Byte]): UIO[Option[Array[Byte]]] =
+  def gete(k: Array[Byte]): IO[NotExists, Array[Byte]] =
+    IO.require(NotExists)(getOrNone(k))
+  def getOrNone(k: Array[Byte]): UIO[Option[Array[Byte]]] =
     effect(db.get(k)).map(_.toOption).orDie
-  def eff_tx(wo: WriteOptions): UManaged[Transaction] =
+  def txe(wo: WriteOptions): UManaged[Transaction] =
     ZManaged.fromAutoCloseable(IO.effect(db.beginTransaction(wo).nn).orDie)
   def eff_close(): UIO[Unit] =
     effectTotal(db.close())
 
 extension (tx: Transaction)
-  def eff_put(k: Array[Byte], v: Array[Byte]): UIO[Unit] =
+  def pute(k: Array[Byte], v: Array[Byte]): UIO[Unit] =
     effect(tx.put(k, v)).orDie
-  def eff_get(k: Array[Byte], ro: ReadOptions): IO[NotExists, Array[Byte]] =
+  def gete(k: Array[Byte], ro: ReadOptions): IO[NotExists, Array[Byte]] =
     IO.require(NotExists)(effect(tx.getForUpdate(ro, k, true)).map(_.toOption).orDie)
-  def eff_commit(): UIO[Unit] =
+  def commite(): UIO[Unit] =
     effect(tx.commit()).orDie
 
-extension [A](xs: Array[Byte])
-  def decode(using c: MessageCodec[A]): UIO[A] =
-    effect(api.decode(xs)).orDie
+def decode[A](xs: Array[Byte])(using c: MessageCodec[A]): UIO[A] =
+  effect(api.decode(xs)).orDie
 
-extension [A](x: A)
-  def encode(using c: MessageCodec[A]): UIO[Array[Byte]] =
-    effectTotal(api.encode(x))
+def encode[A](x: A)(using c: MessageCodec[A]): UIO[Array[Byte]] =
+  effectTotal(api.encode(x))
 
 given CanEqual[None.type, Option[?]] = CanEqual.derived
