@@ -203,7 +203,7 @@ object Dat:
 
 extension (x: Dat)
   def show: String = x.hex.utf8
-  def asKey: Key = x
+  def toKey: Key = x
   def bytes: Array[Byte] = x
 
 case object NotExists
