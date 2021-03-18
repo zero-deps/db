@@ -2,7 +2,7 @@ scalaVersion := "3.0.0-RC1"
 version := zero.git.version()
 
 libraryDependencies ++= Seq(
-  "org.rocksdb" % "rocksdbjni" % "6.14.6"
+  "org.rocksdb" % "rocksdbjni" % "6.15.5"
 , "dev.zio" %% "zio-streams"  % "1.0.5"
 , "dev.zio" %% "zio-test-sbt" % "1.0.5" % Test
 )
@@ -16,8 +16,12 @@ dependsOn(macros)
 
 scalacOptions ++= Seq(
   "-language:postfixOps"
-, "-Yexplicit-nulls"
 , "-language:strictEquality"
+, "-Yexplicit-nulls"
+, "-source", "future-migration"
+, "-deprecation"
+, "-rewrite"
+, "release", "15"
 )
 
 turbo := true

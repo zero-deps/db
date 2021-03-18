@@ -1,97 +1,135 @@
 package db
 
-import zio._, duration._, stream._
-import zio.IO.{effect, effectTotal}
-import zero.ext._, option._
-import proto._, api.MessageCodec, macros._
-import org.rocksdb.{util=>_,_}
+import zio.*, duration.*, stream.*
+import zio.IO.{succeed, effect, effectTotal}
+import zero.ext.*, option.*
+import proto.*, api.MessageCodec, macros.*
+import org.rocksdb.{util as _,*}
 import java.util.Arrays
+import collection.JavaConverters.*
 
 object Store {
   trait Service {
     def put(key: Key, v: Dat): UIO[Unit]
     def get(key: Key): UIO[Option[Dat]]
 
+    def put(column: Column, key: Key, v: Dat): UIO[Unit]
+    def get(column: Column, key: Key): UIO[Option[Dat]]
+
     def add(fid: Fid, dat: Dat): UIO[Eid]
-    def get(fid: Fid, eid: Eid): IO[NotExists, Dat]
-    def all(fid: Fid): UStream[Dat]
+    def all(fid: Fid, after: Option[Eid]): UStream[Dat]
 
     def close(): UIO[Unit]
   }
 
-  def live(dir: String): ULayer[Store] =
+  def live(dir: String, columns: List[Column]=nil): ULayer[Store] =
     ZLayer.fromAcquireRelease {
       for {
         _  <- effectTotal(RocksDB.loadLibrary())
         wo <- effectTotal(WriteOptions())
         ro <- effectTotal(ReadOptions())
+        co <- effectTotal(ColumnFamilyOptions().optimizeUniversalStyleCompaction())
+        cDescriptors <-
+          effectTotal(
+            (RocksDB.DEFAULT_COLUMN_FAMILY :: columns).map(ColumnFamilyDescriptor(_, co)).asJava
+          )
+        cHandles <- succeed(new java.util.ArrayList[ColumnFamilyHandle])
         db <- for {
-                op <- effectTotal {
-                        Options()
-                          .setCreateIfMissing(true)
-                          .setCompressionType(CompressionType.LZ4_COMPRESSION)
-                      }
-                x  <- effect(OptimisticTransactionDB.open(op, dir)).map(_.toOption).orDie
-                y  <- ZIO.getOrFailWith(Exception("open"))(x).orDie
+                op <-
+                  effectTotal {
+                    DBOptions()
+                      .setCreateIfMissing(true)
+                      .setCreateMissingColumnFamilies(true)
+                  }
+                x <-
+                  effect(
+                    OptimisticTransactionDB.open(op, dir, cDescriptors, cHandles).nn
+                  ).map(_.toOption).orDie
+                y <- ZIO.getOrFailWith(Exception("open"))(x).orDie
               } yield y
       } yield new Service {
 
         def put(key: Key, v: Dat): UIO[Unit] =
-          db.pute(key, v)
+          db.putE(key, v)
 
         def get(key: Key): UIO[Option[Dat]] =
-          db.getOrNone(key)
+          db.getOrNoneE(key)
+
+        private val cHandleMap = cHandles.asScala.view.map(x => x.getName -> x).toMap
+        private def getCHandle(column: Column): UIO[ColumnFamilyHandle] = 
+          effect(cHandleMap(column)).orDie
+
+        def put(column: Column, key: Key, v: Dat): UIO[Unit] =
+          for {
+            ch <- getCHandle(column)
+            r <- db.putE(ch, key, v)
+          } yield r
+
+        def get(column: Column, key: Key): UIO[Option[Dat]] =
+          for {
+            ch <- getCHandle(column)
+            r <- db.getOrNoneE(ch, key)
+          } yield r
 
         def add(fid: Fid, dat: Dat): UIO[Eid] =
-          db.txe(wo).use { case tx =>
+          db.txE(wo).use { case tx =>
             for {
-              l  <- tx.gete(fid, ro).fold({
-                      case NotExists => none
-                    }, _.some)
+              l  <- tx.getOrNoneE(fid, ro)
               l1 <- l.inc
-              _  <- tx.pute(fid, l1)
+              _  <- tx.putE(fid, l1)
               _  <- for {
-                      k <- encode(Tuple2(fid, l1))
-                      v <- encode(Tuple1(l))
-                      _ <- tx.pute(k, v)
+                      k <- encodeE(Tuple2(fid, l1))
+                      v <- encodeE(Tuple1(l))
+                      _ <- tx.putE(k, v)
                     } yield unit
               _  <- for {
-                      k <- encode(Tuple3(fid, l1, "dat"))
-                      _ <- tx.pute(k, dat)
+                      k <- encodeE(Tuple3(fid, l1, "dat"))
+                      _ <- tx.putE(k, dat)
                     } yield unit
-              _  <- tx.commite()
+              _  <- tx.commitE()
             } yield l1
           }
 
-        def get(fid: Fid, eid: Eid): IO[NotExists, Dat] =
-          for {
-            k  <- encode(Tuple3(fid, eid, "dat"))
-            x  <- db.gete(k)
-          } yield x
+        def all(fid: Fid, after: Option[Eid]): UStream[Dat] =
+          entries(fid, after).mapM(eid => (for {
+            k <- encodeE(Tuple3(fid, eid, "dat"))
+            x <- db.getE(k)
+          } yield x).orDieWith(x => Throwable(x.toString)))
 
-        def all(fid: Fid): UStream[Dat] =
-          entries(fid).mapM(get(fid, _).orDieWith(x => Throwable(x.toString)))
-
-        private def entries(fid: Fid): UStream[Dat] =
-          Stream.fromEffect(
-            db.gete(fid).fold({case NotExists=>none}, _.some)
-          ).flatMap{
-              Stream.unfoldM(_){
-                case None => IO.succeed(none)
-                case Some(eid) =>
-                  for {
-                    k <- encode(Tuple2(fid, eid))
-                    v <- db.gete(k).orDieWith(x => Throwable(x.toString))
-                    s <- decode[Tuple1[Option[Eid]]](v)
-                  } yield (eid, s._1).some
-              }
+        private def entries(fid: Fid, after: Option[Eid]): UStream[Dat] =
+          Stream.fromEffect{
+            val n: UIO[Option[Eid]] =
+              after match
+                case None => db.getOrNoneE(fid)
+                case Some(eid) => next(fid, eid)
+            n
+          }.flatMap{
+            Stream.unfoldM(_){
+              case None => succeed(none)
+              case Some(eid) =>
+                next(fid, eid).map(n => (eid, n).some)
+            }
           }
+
+        private def next(fid: Fid, eid: Eid): UIO[Option[Eid]] =
+          for {
+            k <- encodeE(Tuple2(fid, eid))
+            v <- db.getE(k).orDieWith(x => Throwable(x.toString))
+            s <- decodeE[Tuple1[Option[Eid]]](v)
+          } yield s._1
 
         given MessageCodec[Tuple1[Option[Eid]]] = caseCodecIdx
         given MessageCodec[Tuple2[Fid,Eid]] = caseCodecIdx
         given MessageCodec[Tuple3[Fid,Eid,String]] = caseCodecIdx
 
-        def close(): UIO[Unit] = db.eff_close()
+        def close(): UIO[Unit] =
+          effect(
+            cHandles.asScala.foreach(_.close())
+          ).tapBoth(
+            _ => effect(db.close())
+          , _ => effect(db.close())
+          )
+            .orDie
       }
     }(_.close())
 }
@@ -102,82 +140,114 @@ def put(key: Key, v: Dat): URIO[Store, Unit] =
 def get(key: Key): URIO[Store, Option[Dat]] =
   ZIO.accessM(_.get.get(key))
 
+def put(column: Column, key: Key, v: Dat): URIO[Store, Unit] =
+  ZIO.accessM(_.get.put(key, v))
+
+def get(column: Column, key: Key): URIO[Store, Option[Dat]] =
+  ZIO.accessM(_.get.get(key))
+
 def add(fid: Fid, dat: Dat): URIO[Store, Eid] =
   ZIO.accessM(_.get.add(fid, dat))
 
-def get(fid: Fid, id: Eid): ZIO[Store, NotExists, Dat] =
-  ZIO.accessM(_.get.get(fid, id))
-
 def all(fid: Fid): ZStream[Store, Nothing, Dat] =
-  ZStream.accessStream(_.get.all(fid))
+  ZStream.accessStream(_.get.all(fid, after=none))
+
+def all(fid: Fid, after: Eid): ZStream[Store, Nothing, Dat] =
+  ZStream.accessStream(_.get.all(fid, after.some))
 
 type Store = Has[Store.Service]
 
+opaque type Column = Array[Byte]
+
+object Column:
+  def apply(xs: Array[Byte]): Column = xs
+
 opaque type Key = Array[Byte]
+
 object Key:
   def apply(xs: Array[Byte]): Key = xs
 
 opaque type Fid = Array[Byte]
+
 object Fid:
   def apply(xs: Array[Byte]): Fid = xs
 
 opaque type Eid = Array[Byte]
+
 extension (x: Option[Eid])
   def inc: UIO[Eid] =
     x match
-      case None => IO.succeed(Array(Byte.MinValue))
+      case None => succeed(Array(Byte.MinValue))
       case Some(x) =>
         for {
           len <- effectTotal(x.length)
           last <- effectTotal(x.last)
-          xs <- if last < Byte.MaxValue
-                then
-                  for {
-                    x1 <- effectTotal(Arrays.copyOf(x, len).nn)
-                    _  <- effectTotal(x1(len-1) = (last + 1).toByte)
-                  } yield x1
-                else
-                  for {
-                    x1 <- effectTotal(Arrays.copyOf(x, len+1).nn)
-                    _  <- effectTotal(x1(len) = Byte.MinValue)
-                  } yield x1
+          xs <-
+            if last < Byte.MaxValue
+            then
+              for {
+                x1 <- effectTotal(Arrays.copyOf(x, len).nn)
+                _  <- effectTotal(x1(len-1) = (last + 1).toByte)
+              } yield x1
+            else
+              for {
+                x1 <- effectTotal(Arrays.copyOf(x, len+1).nn)
+                _  <- effectTotal(x1(len) = Byte.MinValue)
+              } yield x1
         } yield xs
 
 opaque type Dat = Array[Byte]
+
 object Dat:
   def apply(xs: Array[Byte]): Dat = xs
+
 extension (x: Dat)
   def show: String = x.hex.utf8
-  def toKey: Key = x
+  def asKey: Key = x
   def bytes: Array[Byte] = x
 
 case object NotExists
 type NotExists = NotExists.type
 
 extension (db: OptimisticTransactionDB)
-  def pute(k: Array[Byte], v: Array[Byte]): UIO[Unit] =
+  def putE(k: Array[Byte], v: Array[Byte]): UIO[Unit] =
     effect(db.put(k, v)).orDie
-  def gete(k: Array[Byte]): IO[NotExists, Array[Byte]] =
-    IO.require(NotExists)(getOrNone(k))
-  def getOrNone(k: Array[Byte]): UIO[Option[Array[Byte]]] =
+
+  def putE(ch: ColumnFamilyHandle, k: Array[Byte], v: Array[Byte]): UIO[Unit] =
+    effect(db.put(ch, k, v)).orDie
+
+  def getE(k: Array[Byte]): IO[NotExists, Array[Byte]] =
+    IO.require(NotExists)(getOrNoneE(k))
+
+  def getE(ch: ColumnFamilyHandle, k: Array[Byte]): IO[NotExists, Array[Byte]] =
+    IO.require(NotExists)(getOrNoneE(ch, k))
+
+  def getOrNoneE(k: Array[Byte]): UIO[Option[Array[Byte]]] =
     effect(db.get(k)).map(_.toOption).orDie
-  def txe(wo: WriteOptions): UManaged[Transaction] =
+
+  def getOrNoneE(ch: ColumnFamilyHandle, k: Array[Byte]): UIO[Option[Array[Byte]]] =
+    effect(db.get(ch, k)).map(_.toOption).orDie
+
+  def txE(wo: WriteOptions): UManaged[Transaction] =
     ZManaged.fromAutoCloseable(IO.effect(db.beginTransaction(wo).nn).orDie)
-  def eff_close(): UIO[Unit] =
-    effectTotal(db.close())
 
 extension (tx: Transaction)
-  def pute(k: Array[Byte], v: Array[Byte]): UIO[Unit] =
+  def putE(k: Array[Byte], v: Array[Byte]): UIO[Unit] =
     effect(tx.put(k, v)).orDie
-  def gete(k: Array[Byte], ro: ReadOptions): IO[NotExists, Array[Byte]] =
-    IO.require(NotExists)(effect(tx.getForUpdate(ro, k, true)).map(_.toOption).orDie)
-  def commite(): UIO[Unit] =
+
+  def getE(k: Array[Byte], ro: ReadOptions): IO[NotExists, Array[Byte]] =
+    IO.require(NotExists)(getOrNoneE(k, ro))
+
+  def getOrNoneE(k: Array[Byte], ro: ReadOptions): UIO[Option[Array[Byte]]] =
+    effect(tx.getForUpdate(ro, k, true)).map(_.toOption).orDie
+
+  def commitE(): UIO[Unit] =
     effect(tx.commit()).orDie
 
-def decode[A](xs: Array[Byte])(using c: MessageCodec[A]): UIO[A] =
+def decodeE[A](xs: Array[Byte])(using c: MessageCodec[A]): UIO[A] =
   effect(api.decode(xs)).orDie
 
-def encode[A](x: A)(using c: MessageCodec[A]): UIO[Array[Byte]] =
+def encodeE[A](x: A)(using c: MessageCodec[A]): UIO[Array[Byte]] =
   effectTotal(api.encode(x))
 
 given CanEqual[None.type, Option[?]] = CanEqual.derived
