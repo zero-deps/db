@@ -21,7 +21,7 @@ scalacOptions ++= Seq(
 , "-source", "future-migration"
 , "-deprecation"
 , "-rewrite"
-, "release", "15"
+, "release", "11"
 )
 
 turbo := true
