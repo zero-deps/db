@@ -31,7 +31,9 @@ object Store {
         co <- effectTotal(ColumnFamilyOptions().optimizeUniversalStyleCompaction())
         cDescriptors <-
           effectTotal(
-            (RocksDB.DEFAULT_COLUMN_FAMILY :: columns).map(ColumnFamilyDescriptor(_, co)).asJava
+            (RocksDB.DEFAULT_COLUMN_FAMILY :: columns.map(_.toArray))
+              .map(ColumnFamilyDescriptor(_, co))
+              .asJava
           )
         cHandles <- succeed(new java.util.ArrayList[ColumnFamilyHandle])
         db <- for {
@@ -55,7 +57,8 @@ object Store {
         def get(key: Key): UIO[Option[Dat]] =
           db.getOrNoneE(key)
 
-        private val cHandleMap = cHandles.asScala.view.map(x => x.getName -> x).toMap
+        private val cHandleMap =
+          cHandles.asScala.view.map(x => IArray.unsafeFromArray(x.getName.nn) -> x).toMap
         private def getCHandle(column: Column): UIO[ColumnFamilyHandle] = 
           effect(cHandleMap(column)).orDie
 
@@ -157,27 +160,27 @@ def all(fid: Fid, after: Eid): ZStream[Store, Nothing, Dat] =
 
 type Store = Has[Store.Service]
 
-opaque type Column = Array[Byte]
+opaque type Column = IArray[Byte]
 
 object Column:
-  def apply(xs: Array[Byte]): Column = xs
+  def apply(xs: IArray[Byte]): Column = xs
 
-opaque type Key = Array[Byte]
+opaque type Key = IArray[Byte]
 
 object Key:
-  def apply(xs: Array[Byte]): Key = xs
+  def apply(xs: IArray[Byte]): Key = xs
 
-opaque type Fid = Array[Byte]
+opaque type Fid = IArray[Byte]
 
 object Fid:
-  def apply(xs: Array[Byte]): Fid = xs
+  def apply(xs: IArray[Byte]): Fid = xs
 
-opaque type Eid = Array[Byte]
+opaque type Eid = IArray[Byte]
 
 extension (x: Option[Eid])
   def inc: UIO[Eid] =
     x match
-      case None => succeed(Array(Byte.MinValue))
+      case None => succeed(IArray.unsafeFromArray(Array(Byte.MinValue)))
       case Some(x) =>
         for {
           len <- effectTotal(x.length)
@@ -186,68 +189,68 @@ extension (x: Option[Eid])
             if last < Byte.MaxValue
             then
               for {
-                x1 <- effectTotal(Arrays.copyOf(x, len).nn)
+                x1 <- effectTotal(Arrays.copyOf(x.toArray, len).nn)
                 _  <- effectTotal(x1(len-1) = (last + 1).toByte)
-              } yield x1
+              } yield IArray.unsafeFromArray(x1)
             else
               for {
-                x1 <- effectTotal(Arrays.copyOf(x, len+1).nn)
+                x1 <- effectTotal(Arrays.copyOf(x.toArray, len+1).nn)
                 _  <- effectTotal(x1(len) = Byte.MinValue)
-              } yield x1
+              } yield IArray.unsafeFromArray(x1)
         } yield xs
 
-opaque type Dat = Array[Byte]
+opaque type Dat = IArray[Byte]
 
 object Dat:
-  def apply(xs: Array[Byte]): Dat = xs
+  def apply(xs: IArray[Byte]): Dat = xs
 
 extension (x: Dat)
   def show: String = x.hex.utf8
   def toKey: Key = x
-  def bytes: Array[Byte] = x
+  def bytes: IArray[Byte] = x
 
 case object NotExists
 type NotExists = NotExists.type
 
 extension (db: OptimisticTransactionDB)
-  def putE(k: Array[Byte], v: Array[Byte]): UIO[Unit] =
-    effect(db.put(k, v)).orDie
+  def putE(k: IArray[Byte], v: IArray[Byte]): UIO[Unit] =
+    effect(db.put(k.toArray, v.toArray)).orDie
 
-  def putE(ch: ColumnFamilyHandle, k: Array[Byte], v: Array[Byte]): UIO[Unit] =
-    effect(db.put(ch, k, v)).orDie
+  def putE(ch: ColumnFamilyHandle, k: IArray[Byte], v: IArray[Byte]): UIO[Unit] =
+    effect(db.put(ch, k.toArray, v.toArray)).orDie
 
-  def getE(k: Array[Byte]): IO[NotExists, Array[Byte]] =
+  def getE(k: IArray[Byte]): IO[NotExists, IArray[Byte]] =
     IO.require(NotExists)(getOrNoneE(k))
 
-  def getE(ch: ColumnFamilyHandle, k: Array[Byte]): IO[NotExists, Array[Byte]] =
+  def getE(ch: ColumnFamilyHandle, k: IArray[Byte]): IO[NotExists, IArray[Byte]] =
     IO.require(NotExists)(getOrNoneE(ch, k))
 
-  def getOrNoneE(k: Array[Byte]): UIO[Option[Array[Byte]]] =
-    effect(db.get(k)).map(_.toOption).orDie
+  def getOrNoneE(k: IArray[Byte]): UIO[Option[IArray[Byte]]] =
+    effect(db.get(k.toArray)).map(_.toOption.map(IArray.unsafeFromArray)).orDie
 
-  def getOrNoneE(ch: ColumnFamilyHandle, k: Array[Byte]): UIO[Option[Array[Byte]]] =
-    effect(db.get(ch, k)).map(_.toOption).orDie
+  def getOrNoneE(ch: ColumnFamilyHandle, k: IArray[Byte]): UIO[Option[IArray[Byte]]] =
+    effect(db.get(ch, k.toArray)).map(_.toOption.map(IArray.unsafeFromArray)).orDie
 
   def txE(wo: WriteOptions): UManaged[Transaction] =
     ZManaged.fromAutoCloseable(IO.effect(db.beginTransaction(wo).nn).orDie)
 
 extension (tx: Transaction)
-  def putE(k: Array[Byte], v: Array[Byte]): UIO[Unit] =
-    effect(tx.put(k, v)).orDie
+  def putE(k: IArray[Byte], v: IArray[Byte]): UIO[Unit] =
+    effect(tx.put(k.toArray, v.toArray)).orDie
 
-  def getE(k: Array[Byte], ro: ReadOptions): IO[NotExists, Array[Byte]] =
+  def getE(k: IArray[Byte], ro: ReadOptions): IO[NotExists, IArray[Byte]] =
     IO.require(NotExists)(getOrNoneE(k, ro))
 
-  def getOrNoneE(k: Array[Byte], ro: ReadOptions): UIO[Option[Array[Byte]]] =
-    effect(tx.getForUpdate(ro, k, true)).map(_.toOption).orDie
+  def getOrNoneE(k: IArray[Byte], ro: ReadOptions): UIO[Option[IArray[Byte]]] =
+    effect(tx.getForUpdate(ro, k.toArray, true)).map(_.toOption.map(IArray.unsafeFromArray)).orDie
 
   def commitE(): UIO[Unit] =
     effect(tx.commit()).orDie
 
-def decodeE[A](xs: Array[Byte])(using c: MessageCodec[A]): UIO[A] =
-  effect(api.decode(xs)).orDie
+def decodeE[A](xs: IArray[Byte])(using c: MessageCodec[A]): UIO[A] =
+  effect(api.decodeI(xs)).orDie
 
-def encodeE[A](x: A)(using c: MessageCodec[A]): UIO[Array[Byte]] =
-  effectTotal(api.encode(x))
+def encodeE[A](x: A)(using c: MessageCodec[A]): UIO[IArray[Byte]] =
+  effectTotal(api.encodeI(x))
 
 given CanEqual[None.type, Option[?]] = CanEqual.derived
