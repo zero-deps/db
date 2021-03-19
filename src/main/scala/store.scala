@@ -3,7 +3,7 @@ package db
 import zio.*, duration.*, stream.*
 import zio.IO.{succeed, effect, effectTotal}
 import zero.ext.*, option.*
-import proto.*, api.MessageCodec, macros.*
+import proto.*
 import org.rocksdb.{util as _,*}
 import java.util.Arrays
 import collection.JavaConverters.*
@@ -248,9 +248,9 @@ extension (tx: Transaction)
     effect(tx.commit()).orDie
 
 def decodeE[A](xs: IArray[Byte])(using c: MessageCodec[A]): UIO[A] =
-  effect(api.decodeI(xs)).orDie
+  effect(decodeI(xs)).orDie
 
 def encodeE[A](x: A)(using c: MessageCodec[A]): UIO[IArray[Byte]] =
-  effectTotal(api.encodeI(x))
+  effectTotal(encodeI(x))
 
 given CanEqual[None.type, Option[?]] = CanEqual.derived
