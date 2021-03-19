@@ -9,10 +9,9 @@ libraryDependencies ++= Seq(
 testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")
 
 lazy val ext = project.in(file("deps/ext"))
-dependsOn(ext)
-
 lazy val macros = project.in(file("deps/proto/macros"))
-dependsOn(macros)
+
+dependsOn(ext, macros)
 
 scalacOptions ++= Seq(
   "-language:postfixOps"
