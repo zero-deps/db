@@ -1,19 +1,32 @@
-scalaVersion := "3.0.0-RC1"
-version := zero.git.version()
+lazy val db = project.in(file("db")).settings(
+  scalaVersion := "3.0.0-RC2"
+, crossScalaVersions := "3.0.0-RC2" :: Nil
+, scalacOptions ++= opts
+, libraryDependencies ++= Seq(
+    "org.rocksdb" % "rocksdbjni" % "6.19.3"
+  , "dev.zio" %% "zio-streams"  % "1.0.6"
+  , "dev.zio" %% "zio-test-sbt" % "1.0.6" % Test
+  )
+, testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")
+).dependsOn(proto)
 
-libraryDependencies ++= Seq(
-  "org.rocksdb" % "rocksdbjni" % "6.15.5"
-, "dev.zio" %% "zio-streams"  % "1.0.5"
-, "dev.zio" %% "zio-test-sbt" % "1.0.5" % Test
+lazy val proto = project.in(file("deps/proto/proto")).settings(
+  libraryDependencies += "com.google.protobuf" % "protobuf-java" % "3.15.6"
+, scalaVersion := "3.0.0-RC2"
+, crossScalaVersions := "3.0.0-RC2" :: Nil
+).dependsOn(protoops)
+
+lazy val protoops = project.in(file("deps/proto/ops")).settings(
+  scalaVersion := "3.0.0-RC2"
+, crossScalaVersions := "3.0.0-RC2" :: Nil
+).dependsOn(protosyntax)
+
+lazy val protosyntax = project.in(file("deps/proto/syntax")).settings(
+  scalaVersion := "3.0.0-RC2"
+, crossScalaVersions := "3.0.0-RC2" :: Nil
 )
-testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")
 
-lazy val ext = project.in(file("deps/ext"))
-lazy val macros = project.in(file("deps/proto/macros"))
-
-dependsOn(ext, macros)
-
-scalacOptions ++= Seq(
+val opts = Seq(
   "-language:postfixOps"
 , "-language:strictEquality"
 , "-Yexplicit-nulls"
@@ -26,5 +39,3 @@ scalacOptions ++= Seq(
 turbo := true
 useCoursier := true
 Global / onChangedBuildSource := ReloadOnSourceChanges
-
-resolvers += Resolver.JCenterRepository

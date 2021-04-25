@@ -2,11 +2,11 @@ package db
 
 import zio.*, duration.*, stream.*
 import zio.IO.{succeed, effect, effectTotal}
-import zero.ext.*, option.*
 import proto.*
 import org.rocksdb.{util as _,*}
 import java.util.Arrays
 import collection.JavaConverters.*
+import util.{*, given}
 
 object Store {
   trait Service {
@@ -39,15 +39,14 @@ object Store {
         db <- for {
                 op <-
                   effectTotal {
-                    DBOptions()
-                      .setCreateIfMissing(true)
-                      .setCreateMissingColumnFamilies(true)
+                    DBOptions().nn
+                      .setCreateIfMissing(true).nn
+                      .setCreateMissingColumnFamilies(true).nn
                   }
-                x <-
+                y <-
                   effect(
                     OptimisticTransactionDB.open(op, dir, cDescriptors, cHandles).nn
-                  ).map(_.toOption).orDie
-                y <- ZIO.getOrFailWith(Exception("open"))(x).orDie
+                  ).orDie
               } yield y
       } yield new Service {
 
