@@ -1,6 +1,9 @@
+lazy val root = project.in(file(".")).settings(
+  scalaVersion := "3.0.0-RC2"
+).aggregate(db)
+
 lazy val db = project.in(file("db")).settings(
   scalaVersion := "3.0.0-RC2"
-, crossScalaVersions := "3.0.0-RC2" :: Nil
 , scalacOptions ++= opts
 , libraryDependencies ++= Seq(
     "org.rocksdb" % "rocksdbjni" % "6.19.3"
@@ -13,17 +16,14 @@ lazy val db = project.in(file("db")).settings(
 lazy val proto = project.in(file("deps/proto/proto")).settings(
   libraryDependencies += "com.google.protobuf" % "protobuf-java" % "3.15.6"
 , scalaVersion := "3.0.0-RC2"
-, crossScalaVersions := "3.0.0-RC2" :: Nil
 ).dependsOn(protoops)
 
 lazy val protoops = project.in(file("deps/proto/ops")).settings(
   scalaVersion := "3.0.0-RC2"
-, crossScalaVersions := "3.0.0-RC2" :: Nil
 ).dependsOn(protosyntax)
 
 lazy val protosyntax = project.in(file("deps/proto/syntax")).settings(
   scalaVersion := "3.0.0-RC2"
-, crossScalaVersions := "3.0.0-RC2" :: Nil
 )
 
 val opts = Seq(
