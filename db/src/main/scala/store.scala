@@ -8,6 +8,8 @@ import java.util.Arrays
 import collection.JavaConverters.*
 import util.{*, given}
 
+import ext.*
+
 object Store {
   trait Service {
     def put(key: Key, v: Dat): UIO[Unit]

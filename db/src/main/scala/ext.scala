@@ -1,4 +1,4 @@
-package db
+package db.ext
 
 extension (x: Array[Byte])
   def hex: Array[Byte] =
